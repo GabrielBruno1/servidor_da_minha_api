@@ -27,24 +27,32 @@ app.get('/api/search', async (req, res) => {
     console.log('Browser iniciado! Versão:', await browser.version());
 
     const page = await browser.newPage();
+    await page.setDefaultNavigationTimeout(60000);  // Timeout global: 60s pra toda navegação
+
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
 
     const url = `https://www.webmotors.com.br/carros/${q.replace(/ /g, '-')}`;
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    console.log('Navegando para:', url);
+    await page.goto(url, { 
+      waitUntil: 'domcontentloaded',  // Mais rápido: só espera HTML, não rede completa
+      timeout: 60000  // 60s específico pro goto
+    });
+    console.log('Página carregada!');
 
     const cars = await page.evaluate(() => {
       return Array.from(document.querySelectorAll('.sc-aphcUG')).map(el => {
-        const title = el.querySelector('h2')?.innerText || '';
-        const price = el.querySelector('[data-testid="price"]')?.innerText || '';
-        const km = el.querySelector('[data-testid="km"]')?.innerText || '';
-        const year = el.querySelector('[data-testid="year"]')?.innerText || '';
-        const loc = el.querySelector('[data-testid="location"]')?.innerText || '';
+        const title = el.querySelector('h2')?.innerText?.trim() || '';
+        const price = el.querySelector('[data-testid="price"]')?.innerText?.trim() || '';
+        const km = el.querySelector('[data-testid="km"]')?.innerText?.trim() || '';
+        const year = el.querySelector('[data-testid="year"]')?.innerText?.trim() || '';
+        const loc = el.querySelector('[data-testid="location"]')?.innerText?.trim() || '';
         const link = el.querySelector('a')?.href || '';
         return { title, price, km, year, loc, link, source: 'Webmotors' };
       }).filter(c => c.title).slice(0, 10);
     });
 
     await browser.close();
+    console.log(`Scraping concluído: ${cars.length} carros encontrados`);
     res.json({ results: cars });
   } catch (error) {
     console.error('Erro no scraping:', error.message);
