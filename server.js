@@ -11,19 +11,21 @@ app.get('/api/search', async (req, res) => {
   if (!q) return res.status(400).json({ error: 'q obrigatório' });
 
   try {
-    const browser = await puppeteer.launch({
-      headless: true,
-      // REMOVIDO: executablePath (deixa Puppeteer baixar Chromium auto)
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',  // Para containers como Render
-        '--disable-gpu',
-        '--disable-features=VizDisplayCompositor',
-        '--single-process',  // Para memória baixa no free tier
-        '--no-zygote'
-      ]
-    });
+// No início do try, adicione:
+console.log('Iniciando Puppeteer...');
+const browser = await puppeteer.launch({
+  headless: true,
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--disable-features=VizDisplayCompositor',
+    '--single-process',
+    '--no-zygote'
+  ]
+});
+console.log('Browser iniciado com sucesso!');
 
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
