@@ -27,28 +27,35 @@ app.get('/api/search', async (req, res) => {
     console.log('Browser iniciado! Versão:', await browser.version());
 
     const page = await browser.newPage();
-    await page.setDefaultNavigationTimeout(60000);  // Timeout global: 60s pra toda navegação
+    await page.setDefaultNavigationTimeout(60000);  // 60s global
 
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
 
-    const url = `https://www.webmotors.com.br/carros/${q.replace(/ /g, '-')}`;
+    // URL CORRETA: Busca real com params (marca, tipo, localização)
+    const encodedQ = encodeURIComponent(q);
+    const url = `https://www.webmotors.com.br/carros?autocomplete=${encodedQ}&autocompleteTerm=${encodedQ}&tipoveiculo=carros&marca1=${q.toUpperCase()}`;
     console.log('Navegando para:', url);
     await page.goto(url, { 
-      waitUntil: 'domcontentloaded',  // Mais rápido: só espera HTML, não rede completa
-      timeout: 60000  // 60s específico pro goto
+      waitUntil: 'domcontentloaded', 
+      timeout: 60000 
     });
-    console.log('Página carregada!');
+
+    // ESPERA EXTRA: Aguarda os cards carregarem (JS dinâmico)
+    await page.waitForSelector('.result-item, [data-testid="result-item"], .card-item', { timeout: 30000 });
+    console.log('Cards carregados!');
 
     const cars = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll('.sc-aphcUG')).map(el => {
-        const title = el.querySelector('h2')?.innerText?.trim() || '';
-        const price = el.querySelector('[data-testid="price"]')?.innerText?.trim() || '';
-        const km = el.querySelector('[data-testid="km"]')?.innerText?.trim() || '';
-        const year = el.querySelector('[data-testid="year"]')?.innerText?.trim() || '';
-        const loc = el.querySelector('[data-testid="location"]')?.innerText?.trim() || '';
-        const link = el.querySelector('a')?.href || '';
+      // Seletores atualizados (flexíveis pro Webmotors 2025)
+      const items = document.querySelectorAll('.result-item, [data-testid="result-item"], .card-item, .sc-aphcUG');
+      return Array.from(items).map(el => {
+        const title = el.querySelector('h2, .title, [data-testid="title"]')?.innerText?.trim() || '';
+        const price = el.querySelector('[data-testid="price"], .price, .sc-bczRLJ')?.innerText?.trim() || '';
+        const km = el.querySelector('[data-testid="km"], .km, .sc-jSMfEi')?.innerText?.trim() || '';
+        const year = el.querySelector('[data-testid="year"], .year, .sc-kDvujY')?.innerText?.trim() || '';
+        const loc = el.querySelector('[data-testid="location"], .location, .sc-dIouRR')?.innerText?.trim() || '';
+        const link = el.querySelector('a')?.href || el.querySelector('a')?.getAttribute('href') || '';
         return { title, price, km, year, loc, link, source: 'Webmotors' };
-      }).filter(c => c.title).slice(0, 10);
+      }).filter(c => c.title).slice(0, 10);  // Limita a 10
     });
 
     await browser.close();
