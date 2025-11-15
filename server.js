@@ -120,7 +120,7 @@ async function scrapeOLX(q) {
       const price = el.querySelector('[data-testid="ad-price"], .price')?.innerText?.trim() || '';
       const loc = el.querySelector('[data-testid="ad-location"], .location')?.innerText?.trim() || '';
       const link = a?.href || '';
-      return { title, price, '', '', loc, link, source: 'OLX' };  // Km/ano vazios na OLX
+      return { title, price, km: '', year: '', loc, link, source: 'OLX' };  // Km/ano vazios na OLX
     }).filter(c => c.title && c.price).slice(0, 10);
   });
 
