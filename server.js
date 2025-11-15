@@ -6,6 +6,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Função delay compatível com Puppeteer v22+
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 app.get('/api/search', async (req, res) => {
   const { q } = req.query;
   if (!q) return res.status(400).json({ error: 'q obrigatório' });
@@ -54,27 +57,32 @@ async function scrapeWebmotors(q) {
   console.log('Navegando para Webmotors:', url);
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-  // DELAY MAIOR: 10s pra JS carregar anúncios
-  await page.waitForTimeout(10000);
+  // DELAY MAIOR: 10s pra JS carregar anúncios (usando Promise compatível)
+  await delay(10000);
   console.log('Delay 10s concluído, rolando página pra lazy load...');
 
-  // SCROLL: Simula scroll pra carregar mais cards (Webmotors usa lazy loading)
+  // SCROLL: Simula scroll pra carregar mais cards
   await page.evaluate(() => {
     window.scrollTo(0, document.body.scrollHeight / 2);
   });
-  await page.waitForTimeout(3000);  // 3s após scroll
+  await delay(3000);  // 3s após scroll
 
-  // Aguarda seletor exato do card (baseado no HTML que você mandou)
+  // Aguarda seletor exato do card (opcional, sem timeout rígido)
   try {
-    await page.waitForSelector('div[class*="_Head_"]', { timeout: 30000 });
+    await page.waitForSelector('div[class*="_Head_"]', { timeout: 10000 });  // Reduzido pra 10s
     console.log('Cards _Head_ carregados!');
   } catch (e) {
-    console.log('Seletor _Head_ não encontrado, tentando genérico...');
+    console.log('Seletor _Head_ não encontrado, tentando extrair mesmo assim...');
   }
 
+  // DEBUG: Log do HTML pra ver quantos elementos achou (opcional, remova depois)
+  const htmlSnippet = await page.evaluate(() => document.body.innerHTML.slice(0, 1000));  // Primeiros 1000 chars
+  console.log('HTML snippet pra debug:', htmlSnippet);
+
   const cars = await page.evaluate(() => {
-    // Seletor EXATO: div._Head_1it3m_1 ou similar (classes CSS modules)
+    // Seletor EXATO: div._Head_1it3m_1 ou similar
     const items = document.querySelectorAll('div[class*="_Head_"], div[class*="_Container_nv1r7_"], [class*="result-item"]');
+    console.log(`Encontrados ${items.length} itens potenciais`);  // Log interno no browser
     return Array.from(items).map(el => {
       const a = el.querySelector('a[target="_blank"][rel="nofollow"]');  // Link principal
       const link = a?.href || '';
@@ -83,7 +91,7 @@ async function scrapeWebmotors(q) {
       const price = el.querySelector('.price, [class*="price"], [data-testid*="price"], ._Price_')?.innerText?.trim() || '';
       const km = el.querySelector('.km, [class*="km"], [data-testid*="km"]')?.innerText?.trim() || '';
       const year = el.querySelector('.year, [class*="year"], [data-testid*="year"]')?.innerText?.trim() || '';
-      const loc = el.querySelector('.location, [class*="location"], [data-testid*="location"]')?.innerText?.trim() || el.querySelector('[class*="_MetadataWrapper_"]')?.innerText?.trim() || '';
+      const loc = el.querySelector('.location, [class*="location"], [data-testid*="location"], [class*="_MetadataWrapper_"]')?.innerText?.trim() || '';
       return { title, price, km, year, loc, link, source: 'Webmotors' };
     }).filter(c => c.title && c.link).slice(0, 10);  // Só com título e link
   });
@@ -110,7 +118,7 @@ async function scrapeOLX(q) {
   console.log('Navegando para OLX:', url);
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-  await page.waitForTimeout(5000);  // Delay pra OLX
+  await delay(5000);  // Delay pra OLX (Promise compatível)
 
   const cars = await page.evaluate(() => {
     const items = document.querySelectorAll('[data-testid="listing-card"], .offer-item, .sc-1k8mkkj-0');
@@ -120,7 +128,7 @@ async function scrapeOLX(q) {
       const price = el.querySelector('[data-testid="ad-price"], .price')?.innerText?.trim() || '';
       const loc = el.querySelector('[data-testid="ad-location"], .location')?.innerText?.trim() || '';
       const link = a?.href || '';
-      return { title, price, km: '', year: '', loc, link, source: 'OLX' };  // Km/ano vazios na OLX
+      return { title, price, km: '', year: '', loc, link, source: 'OLX' };  // CORRIGIDO: km e year com :
     }).filter(c => c.title && c.price).slice(0, 10);
   });
 
