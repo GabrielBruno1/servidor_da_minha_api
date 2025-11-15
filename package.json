@@ -6,9 +6,11 @@
     "start": "node server.js",
     "postinstall": "npx @puppeteer/browsers install chrome@stable"
   },
-  "dependencies": {
+"dependencies": {
     "express": "^4.19.2",
     "puppeteer": "^22.15.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "cors": "^2.8.5"
   }
 }
