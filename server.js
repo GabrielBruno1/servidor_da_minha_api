@@ -1,13 +1,15 @@
 const express = require('express');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const cors = require('cors');
+
+puppeteer.use(StealthPlugin());
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Função delay compatível com Puppeteer v22+
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const delay = ms => new Promise(r => setTimeout(r, ms));
 
 app.get('/api/search', async (req, res) => {
   const { q } = req.query;
@@ -15,120 +17,77 @@ app.get('/api/search', async (req, res) => {
 
   let cars = [];
 
+  // TENTA WEBMOTORS COM STEALTH
   try {
-    // Tenta Webmotors primeiro
-    console.log('Tentando Webmotors...');
+    console.log('Tentando Webmotors com Stealth...');
     cars = await scrapeWebmotors(q);
     if (cars.length > 0) {
       console.log(`Webmotors OK: ${cars.length} carros`);
-    } else {
-      console.log('Webmotors falhou, tentando OLX...');
-      cars = await scrapeOLX(q);
     }
-  } catch (error) {
-    console.error('Erro geral:', error.message);
+  } catch (e) {
+    console.log('Webmotors falhou, indo pra OLX...');
   }
 
-  res.json({ results: cars.slice(0, 10) });
+  // FALLBACK OLX
+  if (cars.length === 0) {
+    cars = await scrapeOLX(q);
+    console.log(`OLX OK: ${cars.length} carros`);
+  }
+
+  const resultsWithId = cars.map((c, i) => ({ ...c, id: `car-${i}` }));
+  res.json({ results: resultsWithId });
 });
 
-// Função para Webmotors (seletor baseado no HTML fornecido)
+// WEBMOTORS COM STEALTH
 async function scrapeWebmotors(q) {
   const browser = await puppeteer.launch({
     headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--disable-features=VizDisplayCompositor',
-      '--single-process',
-      '--no-zygote'
-    ]
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
   });
 
   const page = await browser.newPage();
-  await page.setDefaultNavigationTimeout(90000);  // 90s global
 
+  // STEALTH: Remove sinais de bot
+  await page.setViewport({ width: 1366, height: 768 });
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
-
-  const encodedQ = encodeURIComponent(q);
-  const url = `https://www.webmotors.com.br/carros?autocomplete=${encodedQ}&autocompleteTerm=${encodedQ}&tipoveiculo=carros&marca1=${q.toUpperCase()}`;
-  console.log('Navegando para Webmotors:', url);
+  
+  const url = `https://www.webmotors.com.br/carros/${encodeURIComponent(q)}`;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-  // DELAY MAIOR: 10s pra JS carregar anúncios (usando Promise compatível)
-  await delay(10000);
-  console.log('Delay 10s concluído, rolando página pra lazy load...');
-
-  // SCROLL: Simula scroll pra carregar mais cards
-  await page.evaluate(() => {
-    window.scrollTo(0, document.body.scrollHeight / 2);
-  });
-  await delay(3000);  // 3s após scroll
-
-  // Aguarda seletor exato do card (opcional, sem timeout rígido)
-  try {
-    await page.waitForSelector('div[class*="_Head_"]', { timeout: 10000 });  // Reduzido pra 10s
-    console.log('Cards _Head_ carregados!');
-  } catch (e) {
-    console.log('Seletor _Head_ não encontrado, tentando extrair mesmo assim...');
-  }
-
-  // DEBUG: Log do HTML pra ver quantos elementos achou (opcional, remova depois)
-  const htmlSnippet = await page.evaluate(() => document.body.innerHTML.slice(0, 1000));  // Primeiros 1000 chars
-  console.log('HTML snippet pra debug:', htmlSnippet);
+  await delay(8000);
 
   const cars = await page.evaluate(() => {
-    // Seletor EXATO: div._Head_1it3m_1 ou similar
-    const items = document.querySelectorAll('div[class*="_Head_"], div[class*="_Container_nv1r7_"], [class*="result-item"]');
-    console.log(`Encontrados ${items.length} itens potenciais`);  // Log interno no browser
-    return Array.from(items).map(el => {
-      const a = el.querySelector('a[target="_blank"][rel="nofollow"]');  // Link principal
-      const link = a?.href || '';
-      const img = a?.querySelector('img');  // Imagem com title/alt como título
-      const title = img?.title || img?.alt || el.querySelector('h2, .title, [class*="title"]')?.innerText?.trim() || '';
-      const price = el.querySelector('.price, [class*="price"], [data-testid*="price"], ._Price_')?.innerText?.trim() || '';
-      const km = el.querySelector('.km, [class*="km"], [data-testid*="km"]')?.innerText?.trim() || '';
-      const year = el.querySelector('.year, [class*="year"], [data-testid*="year"]')?.innerText?.trim() || '';
-      const loc = el.querySelector('.location, [class*="location"], [data-testid*="location"], [class*="_MetadataWrapper_"]')?.innerText?.trim() || '';
-      return { title, price, km, year, loc, link, source: 'Webmotors' };
-    }).filter(c => c.title && c.link).slice(0, 10);  // Só com título e link
+    return Array.from(document.querySelectorAll('a[href*="/comprar/"]')).map(a => {
+      const img = a.querySelector('img');
+      const title = img?.title || img?.alt || '';
+      const price = a.querySelector('[data-testid="price"]')?.innerText || '';
+      const km = a.querySelector('[data-testid="km"]')?.innerText || '';
+      const year = a.querySelector('[data-testid="year"]')?.innerText || '';
+      const loc = a.querySelector('[data-testid="location"]')?.innerText || '';
+      return { title, price, km, year, loc, link: a.href, source: 'Webmotors' };
+    }).filter(c => c.title).slice(0, 10);
   });
 
   await browser.close();
   return cars;
 }
 
-// Fallback: Scraping OLX (mantido, funciona bem)
+// OLX (fallback)
 async function scrapeOLX(q) {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage'
-    ]
-  });
-
+  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage();
-  await page.setDefaultNavigationTimeout(60000);
-
-  const url = `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q=${encodeURIComponent(q)}`;
-  console.log('Navegando para OLX:', url);
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-  await delay(5000);  // Delay pra OLX (Promise compatível)
+  await page.goto(`https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios?q=${q}`, { waitUntil: 'domcontentloaded' });
+  await delay(5000);
 
   const cars = await page.evaluate(() => {
-    const items = document.querySelectorAll('[data-testid="listing-card"], .offer-item, .sc-1k8mkkj-0');
-    return Array.from(items).map(el => {
+    return Array.from(document.querySelectorAll('[data-testid="listing-card"]')).map(el => {
       const a = el.querySelector('a');
-      const title = a?.getAttribute('title')?.trim() || a?.innerText?.trim() || '';
-      const price = el.querySelector('[data-testid="ad-price"], .price')?.innerText?.trim() || '';
-      const loc = el.querySelector('[data-testid="ad-location"], .location')?.innerText?.trim() || '';
-      const link = a?.href || '';
-      return { title, price, km: '', year: '', loc, link, source: 'OLX' };  // CORRIGIDO: km e year com :
+      return {
+        title: a?.getAttribute('title') || '',
+        price: el.querySelector('[data-testid="ad-price"]')?.innerText || '',
+        loc: el.querySelector('[data-testid="ad-location"]')?.innerText || '',
+        link: a?.href || '',
+        km: '', year: '', source: 'OLX'
+      };
     }).filter(c => c.title && c.price).slice(0, 10);
   });
 
@@ -137,6 +96,4 @@ async function scrapeOLX(q) {
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`API rodando na porta ${PORT}`);
-});
+app.listen(PORT, () => console.log(`API rodando na porta ${PORT}`));
